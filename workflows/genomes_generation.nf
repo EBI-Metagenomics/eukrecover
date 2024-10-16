@@ -144,6 +144,12 @@ workflow GGP {
 
     // --- align reads to assemblies ---- //
     assembly_and_reads = tuple_assemblies.join( DECONTAMINATION.out.decontaminated_reads )
+    ALIGN( assembly_and_reads, true, true, true ) // tuple (meta, fasta, [reads])
+    ch_versions = ch_versions.mix( ALIGN.out.versions )
+
+    // bams = ALIGN.out.assembly_bam.map{meta, assembly_fasta, bam, bai -> [meta, bam, bai]}
+    jgi_depth = ALIGN.out.jgi_depth
+    concoct_data = ALIGN.out.concoct_data
 
     if (params.bins) {
         def groupBins = { meta, assembly, fq1, fq2, concoctf, concoctd, metabatf, metabatd, maxbinsf, maxbinsd ->
@@ -179,29 +185,18 @@ workflow GGP {
 
     }
     else {
-
-        ALIGN( assembly_and_reads, true, true, true ) // tuple (meta, fasta, [reads])
-        ch_versions = ch_versions.mix( ALIGN.out.versions )
-
-        // bams = ALIGN.out.assembly_bam.map{meta, assembly_fasta, bam, bai -> [meta, bam, bai]}
-        jgi_depth = ALIGN.out.jgi_depth
-        concoct_data = ALIGN.out.concoct_data
-
-        GUNZIP_ASSEMBLY(tuple_assemblies)
-
         // ---- binning ---- //
         BINNING( GUNZIP_ASSEMBLY.out.uncompressed.join(jgi_depth).join(concoct_data) )
         ch_versions = ch_versions.mix( BINNING.out.versions )
 
-        collectBinsFolder = { meta, bin_folder ->
-            [ meta, bin_folder.listFiles().flatten() ]
-        }
-        concoct_collected_bins = BINNING.out.concoct_bins.map( collectBinsFolder )
-        metabat_collected_bins = BINNING.out.metabat_bins.map( collectBinsFolder )
-        maxbin_collected_bins = BINNING.out.maxbin_bins.map( collectBinsFolder )
+        metabat_bins = assembly_and_runs.join(BINNING.out.metabat_bins).join(jgi_depth) // [ [meta], assembly, [raw reads], bin_folder, bin_depth ]
+        concoct_bins = assembly_and_runs.join(BINNING.out.concoct_bins).join(concoct_data)
+        maxbins_bins = assembly_and_runs.join(BINNING.out.maxbin_bins).join(jgi_depth)
     }    
 
     if ( !params.skip_euk ) {
+
+        combined_bins = metabat_bins.concat(concoct_bins)
 
         // ---- detect euk ---- //
         // input: tuple( meta, assembly_file, [raw_reads], concoct_folder, metabat_folder, depths ), dbs...
