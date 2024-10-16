@@ -13,8 +13,7 @@ process ALIGNMENT_LINKTABLE {
     container 'quay.io/microbiome-informatics/bwa_eukcc:2.2.1_2.0'
 
     input:
-    tuple val(meta), path(reads), path(ref_fasta), path(bins, stageAs: "bins/*")
-    val(binner)
+    tuple val(meta), path(ref_fasta), path(reads), path(bins, stageAs: "bins/*"), path(depth), val(binner)
 
     output:
     tuple val(meta), path("*.links.csv"), emit: links_table
@@ -43,7 +42,7 @@ process ALIGNMENT_LINKTABLE {
     samtools index -@ ${task.cpus} output/${meta.id}_sorted.bam
 
     echo " ---> samtools idxstats sorted bam"
-    samtools idxstats --threads ${task.cpus-1} output/${meta.id}_sorted.bam > ${prefix}.${binner}.idxstats
+    samtools idxstats --threads ${task.cpus} output/${meta.id}_sorted.bam > ${prefix}.${binner}.idxstats
 
     echo "linktable"
     mkdir -p bins

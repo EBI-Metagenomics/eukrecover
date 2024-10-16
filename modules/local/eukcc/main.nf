@@ -64,8 +64,7 @@ process EUKCC {
     container 'quay.io/microbiome-informatics/eukcc:2.1.2'
 
     input:
-    val binner
-    tuple val(meta), path(links), path(bins, stageAs: "bins/*")
+    tuple val(meta), path(links), path(bins, stageAs: "bins/*"), val(binner)
     path eukcc_db
 
     output:

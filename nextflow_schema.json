@@ -39,6 +39,10 @@
           "help_text": "You will need to create a design file with information about the assemblies, raw reads running the pipeline. Use this parameter to specify its location. It has to be a comma-separated file with 5 columns, and a header row.",
           "fa_icon": "fas fa-file-csv"
         },
+        "bins": {
+          "type": "boolean",
+          "description": "Pregenerated bins provided in the sample file"
+        },
         "assembly_software_file": {
           "type": "string",
           "format": "file-path",

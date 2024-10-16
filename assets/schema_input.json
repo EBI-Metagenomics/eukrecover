@@ -33,7 +33,37 @@
         "pattern": "[EDS]RZ[0-9]{6,}",
         "errorMessage": "Assembly accession (ERZ)",
         "meta": ["erz"]
-      }
+      },
+      "concoct_bins": {
+        "type": "string",
+        "default": null,
+        "description": "Folder of pre-generated concoct bins"
+      },      
+      "concoct_depth": {
+        "type": "string",
+        "default": null,
+        "description": "coverage depth for concoct generated bins"
+      },      
+      "metabat_bins": {
+        "type": "string",
+        "default": null,
+        "description": "Folder of pre-generated metabat bins"
+      },
+      "metabat_depth": {
+        "type": "string",
+        "default": null,
+        "description": "coverage depth for metabat generated bins"
+      },       
+      "maxbins_bins": {
+        "type": "string",
+        "default": null,
+        "description": "Folder of pre-generated metabat bins"
+      },      
+      "maxbins_depth": {
+        "type": "string",
+        "default": null,
+        "description": "coverage depth for maxbins generated bins"
+      } 
     },
     "required": ["id", "assembly", "fastq_1", "assembly_accession"]
   }
