@@ -179,7 +179,7 @@ workflow GGP {
         maxbins_extract = extractBins(bin_ch, 'maxbins') 
 
         // join with assembly and run data
-        metabat_bins = assembly_and_runs.join(metabat_extract) // [ [meta], assembly, [raw reads], bin_folder, bin_depth ]
+        metabat_bins = assembly_and_runs.join(metabat_extract) // [ [meta], assembly, [raw reads], bin_folder, bin_depth, binner_name]
         concoct_bins = assembly_and_runs.join(concoct_extract)
         maxbins_bins = assembly_and_runs.join(maxbins_extract)
 
@@ -189,9 +189,19 @@ workflow GGP {
         BINNING( GUNZIP_ASSEMBLY.out.uncompressed.join(jgi_depth).join(concoct_data) )
         ch_versions = ch_versions.mix( BINNING.out.versions )
 
-        metabat_bins = assembly_and_runs.join(BINNING.out.metabat_bins).join(jgi_depth) // [ [meta], assembly, [raw reads], bin_folder, bin_depth ]
-        concoct_bins = assembly_and_runs.join(BINNING.out.concoct_bins).join(concoct_data)
-        maxbins_bins = assembly_and_runs.join(BINNING.out.maxbin_bins).join(jgi_depth)
+        metabat_bins = assembly_and_runs
+            .join(BINNING.out.metabat_bins)
+            .join(jgi_depth)
+            .combine(channel.value('metabat')) // [ [meta], assembly, [raw reads], bin_folder, bin_depth, binner_name ]
+        concoct_bins = assembly_and_runs
+            .join(BINNING.out.concoct_bins)
+            .join(concoct_data)
+            .combine(channel.value('concoct'))
+        maxbins_bins = assembly_and_runs
+            .join(BINNING.out.maxbin_bins)
+            .join(jgi_depth)
+            .combine(channel.value('maxbins'))
+
     }    
 
     if ( !params.skip_euk ) {
