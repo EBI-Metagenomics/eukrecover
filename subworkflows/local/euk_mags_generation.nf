@@ -4,10 +4,8 @@
     ~~~~~~~~~~~~~~~~~~~~~~~~
 */
 include { BUSCO                                      } from '../../modules/local/busco/main'
-include { EUKCC as EUKCC_CONCOCT                     } from '../../modules/local/eukcc/main'
-include { EUKCC as EUKCC_METABAT                     } from '../../modules/local/eukcc/main'
-include { ALIGNMENT_LINKTABLE as LINKTABLE_CONCOCT   } from '../../modules/local/align_linktable/main'
-include { ALIGNMENT_LINKTABLE as LINKTABLE_METABAT   } from '../../modules/local/align_linktable/main'
+include { EUKCC as EUKCC                             } from '../../modules/local/eukcc/main'
+include { ALIGNMENT_LINKTABLE as LINKTABLE           } from '../../modules/local/align_linktable/main'
 include { DREP                                       } from '../../modules/local/drep/main'
 include { DREP as DREP_MAGS                          } from '../../modules/local/drep/main'
 include { BUSCO_EUKCC_QC                             } from '../../modules/local/qc/main'
@@ -23,7 +21,7 @@ include { FILTER_QUALITY                             } from '../../modules/local
 
 workflow EUK_MAGS_GENERATION {
     take:
-    assemblies_reads_bins  // tuple( meta, assembly_file, [raw_reads], concoct_folder, metabat_folder, metabat_depths )
+    assemblies_reads_bins  // tuple( meta, assembly_file, [raw_reads], bins, depths, binner_name )
     eukcc_db
     busco_db
     cat_db_folder
@@ -36,40 +34,28 @@ workflow EUK_MAGS_GENERATION {
     ch_log      = Channel.empty()
 
     /* split the inputs */
-    assemblies_reads_bins.multiMap { meta, assembly, reads, concoct_bins, metabat_bins, depths ->
+    assemblies_reads_bins.multiMap { meta, assembly, reads, bin_folder, depths, binner_name ->
         assembly: [ meta, assembly ]
         reads: [ meta, reads ]
-        bins_concoct: [ meta, concoct_bins ]
-        bins_metabat: [ meta, metabat_bins ]
-        metabat_depths: depths
+        bin_folder: [ meta, bin_folder ]
+        depths: [ meta, depths ]
+        binner_name: channel.value(binner_name)
     }.set {
         input
     }
 
-    // -- concoct -- //
-    binner1 = channel.value("concoct")
+    LINKTABLE( input.reads.join(input.assembly).join(input.bin_folder), input.binner_name) // output: tuple(meta, links.csv)
 
-    LINKTABLE_CONCOCT( input.reads.join(input.assembly).join(input.bins_concoct), binner1 ) // output: tuple(meta, links.csv)
+    EUKCC ( input.binner_name, LINKTABLE_CONCOCT.out.links_table.join ( input.bin_folder ), eukcc_db )
 
-    EUKCC_CONCOCT( binner1, LINKTABLE_CONCOCT.out.links_table.join ( input.bins_concoct ), eukcc_db )
+    ch_versions = ch_versions.mix( LINKTABLE.out.versions.first() )
+    ch_versions = ch_versions.mix( EUKCC.out.versions.first() )
 
-    ch_versions = ch_versions.mix( LINKTABLE_CONCOCT.out.versions.first() )
-    ch_versions = ch_versions.mix( EUKCC_CONCOCT.out.versions.first() )
 
-    // -- metabat2
-    binner2 = channel.value("metabat2")
-
-    LINKTABLE_METABAT( input.reads.join(input.assembly).join(input.bins_metabat), binner2 )
-
-    metabat_linktable_bins = LINKTABLE_METABAT.out.links_table.join( input.bins_metabat ).filter { meta, link, bins -> bins.size() > 0 }
-
-    EUKCC_METABAT( binner2, metabat_linktable_bins, eukcc_db )
-
-    ch_versions = ch_versions.mix( LINKTABLE_METABAT.out.versions )
-    ch_versions = ch_versions.mix( EUKCC_METABAT.out.versions )
+    
 
     // -- prepare quality file
-    combine_quality = EUKCC_CONCOCT.out.eukcc_csv.join( EUKCC_METABAT.out.eukcc_csv )
+    combine_quality = EUKCC.out.eukcc_csv.join( EUKCC_METABAT.out.eukcc_csv )
 
     // "genome,completeness,contamination" //
     functionCATCSV = { item ->
