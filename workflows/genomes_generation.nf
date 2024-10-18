@@ -70,6 +70,7 @@ include { GUNZIP as GUNZIP_ASSEMBLY   } from '../modules/local/utils'
 include { PROCESS_INPUT        } from '../subworkflows/local/process_input_files'
 include { DECONTAMINATION      } from '../subworkflows/local/decontamination'
 include { ALIGN                } from '../subworkflows/local/alignment'
+include { EUKCC_MERGE          } from '../subworkflows/local/eukcc_merge'
 include { EUK_MAGS_GENERATION  } from '../subworkflows/local/euk_mags_generation'
 include { PROK_MAGS_GENERATION } from '../subworkflows/local/prok_mags_generation'
 include { QC_AND_MERGE_READS   } from '../subworkflows/local/qc_and_merge'
@@ -206,26 +207,34 @@ workflow GGP {
 
     if ( !params.skip_euk ) {
 
-        combined_bins = metabat_bins.concat(concoct_bins)
+        euk_combined_bins = metabat_bins.concat(concoct_bins)
 
-        // ---- detect euk ---- //
-        // input: tuple( meta, assembly_file, [raw_reads], concoct_folder, metabat_folder, depths ), dbs...
-        euk_input = assembly_and_reads.join(
-            concoct_collected_bins
-        ).join(
-            metabat_collected_bins
-        ).join(
-            jgi_depth, remainder: true )
+        EUKCC_MERGE( euk_combined_bins, eukcc_db )
 
-        euk_input.view()
+        // -- prepare quality file --
+        combine_quality = EUKCC.out.eukcc_csv.collect().flatten() // [ meta, quality, meta, quality ]
+        
 
-        EUK_MAGS_GENERATION( 
-            euk_input,
-            eukcc_db,
-            busco_db,
+        // -- get all bin folders --
+        eukcc_merged_bins = EUKCC.out.eukcc_merged_bins.collect().flatten() // [ meta, bins, meta, bins ]
+
+        functionGETBINS = { item -> }
+            item.multiMap { meta, assembly, reads, bin_folder, depths, binner_name ->
+                return tuple( meta, bin_folder )
+        }
+
+        collected_euk_bins = metabat_bins.map( functionGETBINS ) // original bins
+            .join ( concoct_bins.map( functionGETBINS )) // original bins
+            .join ( eukcc_merged_bins ) // merged bins
+
+
+        EUK_MAGS_GENERATION(
+            combine_quality
+            collected_euk_bins
+            jgi_depth,
             cat_db_folder,
-            cat_diamond_db,
-            cat_taxonomy_db
+            cat_diamond_db
+            cat_taxonomy_db 
         )
 
         euk_genomes = euk_genomes.mix( EUK_MAGS_GENERATION.out.genomes )
@@ -234,6 +243,7 @@ workflow GGP {
         taxonomy_euks = taxonomy_euks.mix( EUK_MAGS_GENERATION.out.taxonomy )
         ch_versions = ch_versions.mix( EUK_MAGS_GENERATION.out.versions )
         ch_log = ch_log.mix( EUK_MAGS_GENERATION.out.progress_log )
+
     }
 
     if ( !params.skip_prok ) {

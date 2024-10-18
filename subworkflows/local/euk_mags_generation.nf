@@ -4,8 +4,6 @@
     ~~~~~~~~~~~~~~~~~~~~~~~~
 */
 include { BUSCO                                      } from '../../modules/local/busco/main'
-include { EUKCC as EUKCC                             } from '../../modules/local/eukcc/main'
-include { ALIGNMENT_LINKTABLE as LINKTABLE           } from '../../modules/local/align_linktable/main'
 include { DREP                                       } from '../../modules/local/drep/main'
 include { DREP as DREP_MAGS                          } from '../../modules/local/drep/main'
 include { BUSCO_EUKCC_QC                             } from '../../modules/local/qc/main'
@@ -21,62 +19,39 @@ include { FILTER_QUALITY                             } from '../../modules/local
 
 workflow EUK_MAGS_GENERATION {
     take:
-    assemblies_reads_bins  // tuple( meta, assembly_file, [raw_reads], bins, depths, binner_name )
-    eukcc_db
-    busco_db
+    eukcc_quality //tuple( meta, eukcc_quality)
+    all_bins //tuple( meta, concoct_bins, metabat_bins, merged_concoct, merged_metabat )
+    metabat_depths // tuple ( meta, jgi_depth )
     cat_db_folder
     cat_diamond_db
     cat_taxonomy_db
+    busco_db
+
 
     main:
 
     ch_versions = Channel.empty()
     ch_log      = Channel.empty()
 
-    /* split the inputs */
-    assemblies_reads_bins.multiMap { meta, assembly, reads, bin_folder, depths, binner_name ->
-        assembly: [ meta, assembly ]
-        reads: [ meta, reads ]
-        bin_folder: [ meta, bin_folder ]
-        depths: [ meta, depths ]
-        binner_name: channel.value(binner_name)
-    }.set {
-        input
-    }
-
-    LINKTABLE( input.reads.join(input.assembly).join(input.bin_folder), input.binner_name) // output: tuple(meta, links.csv)
-
-    EUKCC ( input.binner_name, LINKTABLE_CONCOCT.out.links_table.join ( input.bin_folder ), eukcc_db )
-
-    ch_versions = ch_versions.mix( LINKTABLE.out.versions.first() )
-    ch_versions = ch_versions.mix( EUKCC.out.versions.first() )
-
-
-    
-
-    // -- prepare quality file
-    combine_quality = EUKCC.out.eukcc_csv.join( EUKCC_METABAT.out.eukcc_csv )
 
     // "genome,completeness,contamination" //
-    functionCATCSV = { item ->
-        def meta = item[0]
-        def list_files = [item[1], item[2]]
+    def functionCATCSV = { item ->
+        def meta = item[0]  
+        def list_files = []
+        item.eachWithIndex { f, i ->
+            if (i % 2 == 1) { // keep every second item. every odd item is meta
+                list_files << f  
+            }
+        }
         return tuple(meta, list_files)
     }
 
-    CONCATENATE_QUALITY_FILES( combine_quality.map( functionCATCSV ), "quality_eukcc.csv" )
+    CONCATENATE_QUALITY_FILES( eukcc_quality.map( functionCATCSV ), "quality_eukcc.csv" )
 
     quality = CONCATENATE_QUALITY_FILES.out.concatenated_result
 
     // -- qs50 -- //
-    // [meta, concoct_bins, metabat_bins, merged_concoct, merged_metabat]
-    // combine concoct, metabat bins with merged bins (if any)
-    collect_data = quality.join( input.bins_concoct ) \
-        .join( input.bins_metabat ) \
-        .join( EUKCC_CONCOCT.out.eukcc_merged_bins ) \
-        .join( EUKCC_METABAT.out.eukcc_merged_bins )
-
-    FILTER_QUALITY( collect_data )
+    FILTER_QUALITY( all_bins )
 
     // input: tuple (meta, genomes/*, quality_file)
     DREP( FILTER_QUALITY.out.qs50_filtered_genomes, params.euk_drep_args, "eukaryotes" )
@@ -107,7 +82,7 @@ workflow EUK_MAGS_GENERATION {
 
     // ---- coverage generation ----- //
 
-    euks_depth = input.metabat_depths.collectFile(name: "euks_depth.txt.gz")
+    euks_depth = metabat_depths.collectFile(name: "euks_depth.txt.gz")
 
     COVERAGE_RECYCLER_EUK(
         DREP_MAGS.out.dereplicated_genomes,
@@ -152,8 +127,6 @@ workflow EUK_MAGS_GENERATION {
         cluster_fasta.copyTo("${params.outdir}/bins/eukaryotes/${cluster_fasta.name.split('_')[0]}/${cluster_fasta.name}")
     })
 
-    ch_log = ch_log.mix (EUKCC_METABAT.out.progress_log )
-    ch_log = ch_log.mix (EUKCC_CONCOCT.out.progress_log )
     ch_log = ch_log.mix( FILTER_QUALITY.out.progress_log )
     ch_log = ch_log.mix( DREP.out.progress_log )
     ch_log = ch_log.mix( DREP_MAGS.out.progress_log )
@@ -163,8 +136,6 @@ workflow EUK_MAGS_GENERATION {
     stats                     = BUSCO_EUKCC_QC.out.eukcc_final_qc
     coverage                  = COVERAGE_RECYCLER_EUK.out.mag_coverage.map{ meta, coverage_file -> coverage_file }.collect()
     taxonomy                  = BAT_TAXONOMY_WRITER.out.all_bin2classification
-    samtools_idxstats_metabat = LINKTABLE_METABAT.out.idxstats
-    samtools_idxstats_concoct = LINKTABLE_CONCOCT.out.idxstats
     busco_short_summary       = BUSCO.out.busco_summary
     versions                  = ch_versions
     progress_log              = ch_log
