@@ -212,29 +212,39 @@ workflow GGP {
         EUKCC_MERGE( euk_combined_bins, eukcc_db )
 
         // -- prepare quality file --
-        combine_quality = EUKCC.out.eukcc_csv.collect().flatten() // [ meta, quality, meta, quality ]
+        combine_quality = EUKCC_MERGE.out.eukcc_csv.collect().flatten() // [ meta, quality, meta, quality ]
         
-
+        combine_quality.view()
         // -- get all bin folders --
-        eukcc_merged_bins = EUKCC.out.eukcc_merged_bins.collect().flatten() // [ meta, bins, meta, bins ]
+        eukcc_merged_bins = EUKCC_MERGE.out.eukcc_merged_bins.collect().flatten()
 
-        functionGETBINS = { item -> }
-            item.multiMap { meta, assembly, reads, bin_folder, depths, binner_name ->
-                return tuple( meta, bin_folder )
+        def functionGETBINS = { full_channel -> 
+            def ( meta, assembly, reads, bin_folder, depths, binner_name ) = full_channel
+            return tuple( meta, bin_folder )
         }
 
-        collected_euk_bins = metabat_bins.map( functionGETBINS ) // original bins
+        collected_euk_bins = metabat_bins.map( functionGETBINS )
             .join ( concoct_bins.map( functionGETBINS )) // original bins
-            .join ( eukcc_merged_bins ) // merged bins
+        
+        for (binner in eukcc_merged_bins) {
+            collected_euk_bins = collected_euk_bins.join(binner)
+        }
 
+        // collected_euk_bins = metabat_bins.map( functionGETBINS ) // original bins
+        //     .join ( concoct_bins.map( functionGETBINS )) // original bins
+        //     .join ( eukcc_merged_bins ) // merged bins
+
+
+        collected_euk_bins.view()
 
         EUK_MAGS_GENERATION(
-            combine_quality
-            collected_euk_bins
+            combine_quality,
+            collected_euk_bins,
             jgi_depth,
             cat_db_folder,
-            cat_diamond_db
-            cat_taxonomy_db 
+            cat_diamond_db,
+            cat_taxonomy_db,
+            busco_db 
         )
 
         euk_genomes = euk_genomes.mix( EUK_MAGS_GENERATION.out.genomes )
@@ -316,8 +326,8 @@ workflow GGP {
     ch_multiqc_files = ch_multiqc_files.mix( FASTQC_AFTER.out.zip.collect{it[1]}.ifEmpty([]) )
     ch_multiqc_files = ch_multiqc_files.mix( QC_AND_MERGE_READS.out.mqc.map { map, json -> json }.collect().ifEmpty([]) )
     ch_multiqc_files = ch_multiqc_files.mix( ALIGN.out.samtools_idxstats.collect{ it[1] }.ifEmpty([]) )
-    ch_multiqc_files = ch_multiqc_files.mix( EUK_MAGS_GENERATION.out.samtools_idxstats_metabat.collect{ it[1] }.ifEmpty([]) )
-    ch_multiqc_files = ch_multiqc_files.mix( EUK_MAGS_GENERATION.out.samtools_idxstats_concoct.collect{ it[1] }.ifEmpty([]) )
+    // ch_multiqc_files = ch_multiqc_files.mix( EUK_MAGS_GENERATION.out.samtools_idxstats_metabat.collect{ it[1] }.ifEmpty([]) )
+    // ch_multiqc_files = ch_multiqc_files.mix( EUK_MAGS_GENERATION.out.samtools_idxstats_concoct.collect{ it[1] }.ifEmpty([]) )
     ch_multiqc_files = ch_multiqc_files.mix( EUK_MAGS_GENERATION.out.busco_short_summary.collect{ it[1] }.ifEmpty([]) )
 
     MULTIQC(

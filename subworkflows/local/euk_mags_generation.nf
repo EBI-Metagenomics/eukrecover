@@ -20,7 +20,7 @@ include { FILTER_QUALITY                             } from '../../modules/local
 workflow EUK_MAGS_GENERATION {
     take:
     eukcc_quality //tuple( meta, eukcc_quality)
-    all_bins //tuple( meta, concoct_bins, metabat_bins, merged_concoct, merged_metabat )
+    all_bins //tuple( meta, concoct_bins, metabat_bins, merged_bins )
     metabat_depths // tuple ( meta, jgi_depth )
     cat_db_folder
     cat_diamond_db

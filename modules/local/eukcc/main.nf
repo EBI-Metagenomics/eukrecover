@@ -64,7 +64,8 @@ process EUKCC {
     container 'quay.io/microbiome-informatics/eukcc:2.1.2'
 
     input:
-    tuple val(meta), path(links), path(bins, stageAs: "bins/*"), val(binner)
+    tuple val(meta), path(links), path(bins)
+    val(binner)
     path eukcc_db
 
     output:
@@ -108,7 +109,7 @@ process EUKCC {
 
     cat <<-END_LOGGING > progress.log
     ${meta.id}\t${task.process}\t${binner}
-        bins: \$(ls bins | wc -l), merged: \$(ls ${binner}_${meta.id}_merged_bins/merged_bins | wc -l)
+        bins: \$(ls ${bins} | wc -l), merged: \$(ls ${binner}_${meta.id}_merged_bins/merged_bins | wc -l)
     END_LOGGING
     """
 }

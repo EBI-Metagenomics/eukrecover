@@ -44,7 +44,7 @@ process FILTER_QUALITY {
     label 'process_light'
 
     input:
-    tuple val(meta), path(quality_file), path(concoct_bins, stageAs: "concoct_bins/*"), path(metabat_bins, stageAs: "metabat_bins/*"), path(concoct_bins_merged, stageAs: "concoct_bins_merged/*"), path(metabat_bins_merged, stageAs: "metabat_bins_merged/*")
+    tuple val(meta), path(quality_file), path(concoct_bins, stageAs: "concoct_bins/"), path(metabat_bins, stageAs: "metabat_bins/"), path(merged_bins, stageAs: "merged_bins/")
 
     output:
     tuple val(meta), path("output_genomes/*"), path("quality_file.csv"), emit: qs50_filtered_genomes, optional: true
@@ -71,10 +71,8 @@ process FILTER_QUALITY {
             mv concoct_bins/\${i} output_genomes; done
         for i in \$(ls metabat_bins | grep -w -f filtered_genomes.txt); do
             mv metabat_bins/\${i} output_genomes; done
-        for i in \$(ls concoct_bins_merged/merged_bins | grep -w -f filtered_genomes.txt); do
-            mv concoct_bins_merged/merged_bins/\${i} output_genomes; done
-        for i in \$(ls metabat_bins_merged/merged_bins | grep -w -f filtered_genomes.txt); do
-            mv metabat_bins_merged/merged_bins/\${i} output_genomes; done
+        for i in \$(ls merged_bins/merged_bins | grep -w -f filtered_genomes.txt); do
+            mv merged_bins/merged_bins/\${i} output_genomes; done
 
         echo "genome,completeness,contamination" > quality_file.csv
         grep -w -f filtered_genomes.txt ${quality_file} | cut -f1-3 | tr '\\t' ',' >> quality_file.csv
@@ -82,7 +80,7 @@ process FILTER_QUALITY {
 
     cat <<-END_LOGGING > progress.log
     ${meta.id}\t${task.process}
-        concoct_bins: \$(ls concoct_bins | wc -l), metabat_bins: \$(ls metabat_bins | wc -l), concoct_bins_merged: \$(ls concoct_bins_merged/merged_bins | wc -l), metabat_bins_merged: \$(ls metabat_bins_merged/merged_bins | wc -l), output_genomes: \$(ls output_genomes | wc -l)
+        concoct_bins: \$(ls concoct_bins | wc -l), metabat_bins: \$(ls metabat_bins | wc -l), merged_bins: \$(ls merged_bins/merged_bins | wc -l)
     END_LOGGING
     """
 }
