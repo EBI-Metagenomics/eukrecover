@@ -70,6 +70,7 @@ include { GUNZIP as GUNZIP_ASSEMBLY   } from '../modules/local/utils'
 include { PROCESS_INPUT        } from '../subworkflows/local/process_input_files'
 include { DECONTAMINATION      } from '../subworkflows/local/decontamination'
 include { ALIGN                } from '../subworkflows/local/alignment'
+include { EUKCC_MERGE          } from '../subworkflows/local/eukcc_merge'
 include { EUK_MAGS_GENERATION  } from '../subworkflows/local/euk_mags_generation'
 include { PROK_MAGS_GENERATION } from '../subworkflows/local/prok_mags_generation'
 include { QC_AND_MERGE_READS   } from '../subworkflows/local/qc_and_merge'
@@ -101,7 +102,7 @@ workflow GGP {
     taxonomy_proks = Channel.empty()
 
     // ---- combine data for reads and contigs pre-processing ---- //
-    groupReads = { meta, assembly, fq1, fq2 ->
+    groupReads = { meta, assembly, fq1, fq2, concoctf, concoctd, metabatf, metabatd, maxbinsf, maxbinsd  ->
         if (fq2 == []) {
             return tuple(meta + [single_end: true], assembly, [fq1])
         }
@@ -115,15 +116,22 @@ workflow GGP {
     FASTQC_BEFORE (assembly_and_runs.map{ meta, _ , reads -> [meta, reads] })
     ch_versions = ch_versions.mix(FASTQC_BEFORE.out.versions)
 
-    // ---- pre-processing ---- //
-    PROCESS_INPUT( assembly_and_runs ) // output: [ meta, assembly, [raw_reads] ]
+    if ( params.skip_preprocessing_input ) {
+        println('skipping pre-processing')
+        input_assemblies_and_reads = assembly_and_runs
+    }
+    else {
+        // ---- pre-processing ---- //
+        PROCESS_INPUT( assembly_and_runs ) // output: [ meta, assembly, [raw_reads] ]
+        ch_versions = ch_versions.mix( PROCESS_INPUT.out.versions )
+        input_assemblies_and_reads = PROCESS_INPUT.out.assembly_and_reads
+    }
 
-    ch_versions = ch_versions.mix( PROCESS_INPUT.out.versions )
-
-    tuple_assemblies = PROCESS_INPUT.out.assembly_and_reads.map{ meta, assembly, _ -> [meta, assembly] }
+    tuple_assemblies = input_assemblies_and_reads.map{ meta, assembly, _ -> [meta, assembly] }
+    tuple_reads = input_assemblies_and_reads.map { meta, _, reads -> [meta, reads] }
 
     // --- trimming reads ---- //
-    QC_AND_MERGE_READS( PROCESS_INPUT.out.assembly_and_reads.map { meta, _, reads -> [meta, reads] } )
+    QC_AND_MERGE_READS( tuple_reads )
 
     ch_versions = ch_versions.mix( QC_AND_MERGE_READS.out.versions )
 
@@ -137,7 +145,6 @@ workflow GGP {
 
     // --- align reads to assemblies ---- //
     assembly_and_reads = tuple_assemblies.join( DECONTAMINATION.out.decontaminated_reads )
-
     ALIGN( assembly_and_reads, true, true, true ) // tuple (meta, fasta, [reads])
     ch_versions = ch_versions.mix( ALIGN.out.versions )
 
@@ -145,37 +152,99 @@ workflow GGP {
     jgi_depth = ALIGN.out.jgi_depth
     concoct_data = ALIGN.out.concoct_data
 
-    GUNZIP_ASSEMBLY(tuple_assemblies)
+    if (params.bins) {
+        def groupBins = { meta, assembly, fq1, fq2, concoctf, concoctd, metabatf, metabatd, maxbinsf, maxbinsd ->
+            def seq_format = false
+            if (fq2 == []) {
+                seq_format = true
+            }
+            return [
+                concoct: concoctf && concoctd ? tuple(meta + [single_end: seq_format], concoctf, concoctd, 'concoct') : null,
+                metabat: metabatf && metabatd ? tuple(meta + [single_end: seq_format], metabatf, metabatd, 'metabat') : null,
+                maxbins: maxbinsf && maxbinsd ? tuple(meta + [single_end: seq_format], maxbinsf, maxbinsd, 'maxbins') : null
+            ].findAll { it.value }  // Filter out null values
+        }
 
-    // ---- binning ---- //
-    BINNING( GUNZIP_ASSEMBLY.out.uncompressed.join(jgi_depth).join(concoct_data) )
-    ch_versions = ch_versions.mix( BINNING.out.versions )
+        bin_ch = Channel.fromSamplesheet("samplesheet", header: true, sep: ',').map(groupBins) // concoct: [ meta, bin_folder, bin_depth ] for each binner if not null 
+    
+        // separate channels for each binner
+        def extractBins = { bin_ch, binner ->
+            bin_ch
+                .filter { it.containsKey(binner) }
+                .map { it[binner] }    
+        }
 
-    collectBinsFolder = { meta, bin_folder ->
-        [ meta, bin_folder.listFiles().flatten() ]
+        // extract data per binner where not empty
+        metabat_extract = extractBins(bin_ch, 'metabat')
+        concoct_extract = extractBins(bin_ch, 'concoct')
+        maxbins_extract = extractBins(bin_ch, 'maxbins') 
+
+        // join with assembly and run data
+        metabat_bins = assembly_and_runs.join(metabat_extract) // [ [meta], assembly, [raw reads], bin_folder, bin_depth, binner_name]
+        concoct_bins = assembly_and_runs.join(concoct_extract)
+        maxbins_bins = assembly_and_runs.join(maxbins_extract)
+
     }
-    concoct_collected_bins = BINNING.out.concoct_bins.map( collectBinsFolder )
-    metabat_collected_bins = BINNING.out.metabat_bins.map( collectBinsFolder )
-    maxbin_collected_bins = BINNING.out.maxbin_bins.map( collectBinsFolder )
+    else {
+        // ---- binning ---- //
+        BINNING( GUNZIP_ASSEMBLY.out.uncompressed.join(jgi_depth).join(concoct_data) )
+        ch_versions = ch_versions.mix( BINNING.out.versions )
+
+        metabat_bins = assembly_and_runs
+            .join(BINNING.out.metabat_bins)
+            .join(jgi_depth)
+            .combine(channel.value('metabat')) // [ [meta], assembly, [raw reads], bin_folder, bin_depth, binner_name ]
+        concoct_bins = assembly_and_runs
+            .join(BINNING.out.concoct_bins)
+            .join(concoct_data)
+            .combine(channel.value('concoct'))
+        maxbins_bins = assembly_and_runs
+            .join(BINNING.out.maxbin_bins)
+            .join(jgi_depth)
+            .combine(channel.value('maxbins'))
+
+    }    
 
     if ( !params.skip_euk ) {
 
-        // ---- detect euk ---- //
-        // input: tuple( meta, assembly_file, [raw_reads], concoct_folder, metabat_folder, depths ), dbs...
-        euk_input = assembly_and_reads.join(
-            concoct_collected_bins
-        ).join(
-            metabat_collected_bins
-        ).join(
-            jgi_depth, remainder: true )
+        euk_combined_bins = metabat_bins.concat(concoct_bins)
 
-        EUK_MAGS_GENERATION( 
-            euk_input,
-            eukcc_db,
-            busco_db,
+        EUKCC_MERGE( euk_combined_bins, eukcc_db )
+
+        // -- prepare quality file --
+        combine_quality = EUKCC_MERGE.out.eukcc_csv.collect().flatten() // [ meta, quality, meta, quality ]
+        
+        combine_quality.view()
+        // -- get all bin folders --
+        eukcc_merged_bins = EUKCC_MERGE.out.eukcc_merged_bins.collect().flatten()
+
+        def functionGETBINS = { full_channel -> 
+            def ( meta, assembly, reads, bin_folder, depths, binner_name ) = full_channel
+            return tuple( meta, bin_folder )
+        }
+
+        collected_euk_bins = metabat_bins.map( functionGETBINS )
+            .join ( concoct_bins.map( functionGETBINS )) // original bins
+        
+        for (binner in eukcc_merged_bins) {
+            collected_euk_bins = collected_euk_bins.join(binner)
+        }
+
+        // collected_euk_bins = metabat_bins.map( functionGETBINS ) // original bins
+        //     .join ( concoct_bins.map( functionGETBINS )) // original bins
+        //     .join ( eukcc_merged_bins ) // merged bins
+
+
+        collected_euk_bins.view()
+
+        EUK_MAGS_GENERATION(
+            combine_quality,
+            collected_euk_bins,
+            jgi_depth,
             cat_db_folder,
             cat_diamond_db,
-            cat_taxonomy_db
+            cat_taxonomy_db,
+            busco_db 
         )
 
         euk_genomes = euk_genomes.mix( EUK_MAGS_GENERATION.out.genomes )
@@ -184,6 +253,7 @@ workflow GGP {
         taxonomy_euks = taxonomy_euks.mix( EUK_MAGS_GENERATION.out.taxonomy )
         ch_versions = ch_versions.mix( EUK_MAGS_GENERATION.out.versions )
         ch_log = ch_log.mix( EUK_MAGS_GENERATION.out.progress_log )
+
     }
 
     if ( !params.skip_prok ) {
@@ -256,8 +326,8 @@ workflow GGP {
     ch_multiqc_files = ch_multiqc_files.mix( FASTQC_AFTER.out.zip.collect{it[1]}.ifEmpty([]) )
     ch_multiqc_files = ch_multiqc_files.mix( QC_AND_MERGE_READS.out.mqc.map { map, json -> json }.collect().ifEmpty([]) )
     ch_multiqc_files = ch_multiqc_files.mix( ALIGN.out.samtools_idxstats.collect{ it[1] }.ifEmpty([]) )
-    ch_multiqc_files = ch_multiqc_files.mix( EUK_MAGS_GENERATION.out.samtools_idxstats_metabat.collect{ it[1] }.ifEmpty([]) )
-    ch_multiqc_files = ch_multiqc_files.mix( EUK_MAGS_GENERATION.out.samtools_idxstats_concoct.collect{ it[1] }.ifEmpty([]) )
+    // ch_multiqc_files = ch_multiqc_files.mix( EUK_MAGS_GENERATION.out.samtools_idxstats_metabat.collect{ it[1] }.ifEmpty([]) )
+    // ch_multiqc_files = ch_multiqc_files.mix( EUK_MAGS_GENERATION.out.samtools_idxstats_concoct.collect{ it[1] }.ifEmpty([]) )
     ch_multiqc_files = ch_multiqc_files.mix( EUK_MAGS_GENERATION.out.busco_short_summary.collect{ it[1] }.ifEmpty([]) )
 
     MULTIQC(

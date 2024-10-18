@@ -89,6 +89,17 @@ nextflow run ebi-metagenomics/genomes-generation \
 --biomes "biome,feature,material" \
 --outdir <FULL_PATH_TO_OUTDIR>
 ```
+
+### Optional arguments
+
+- `--skip_preprocessing_input (default=false)`: skip input data pre-processing step that renames ERZ-fasta files to ERR-run accessions. Useful if you process data not from ENA
+- `--skip_prok (default=false)`: do not generate prokaryotic MAGs
+- `--skip_euk (default=false)`: do not generate eukaryotic MAGs
+- `--skip_concoct (default=false)`: skip CONCOCT binner in binning process
+- `--skip_maxbin2 (default=false)`: skip MaxBin2 binner in binning process
+- `--skip_metabat2 (default=false)`: skip METABAT2 binner in binning process
+- `--merge_pairs (default=false)`: merge paired-end reads on QC step with fastp 
+
 ## Pipeline input data
 
 ### Sample sheet example
